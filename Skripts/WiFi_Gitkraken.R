@@ -4,6 +4,7 @@ pacman::p_load(readr,autoplotly,ggplot2,plotly,tidyverse,party,lubridate, caret,
 wifi_data <- read_csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data/Raw/trainingData.csv")
 valid_data <- read_csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data/Raw/validationData.csv")
 
+# Test Gitkraken
 dim(wifi_data) # The dim() function tells us the dimensions of the data 
 dim(valid_data)
 #### 2.INSPECT DATA ####
