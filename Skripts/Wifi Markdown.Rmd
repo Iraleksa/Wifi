@@ -1,0 +1,531 @@
+---
+title: ' Predicting location based on WIFI fingerprints '
+author: "Irina Aleksashova"
+df_print: kable
+output:
+  rmdformats::readthedown:
+highlight: tango
+gallery: yes
+smooth_scroll: yes
+theme: cosmo
+collapsed: no
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	fig.align = "center",
+	cache = TRUE
+)
+```
+
+```{r Libraries, include=FALSE}
+
+pacman::p_load(readr,autoplotly,ggplot2,plotly,tidyverse,party,lubridate,caret,dplyr,rmdformats,knitr,png,rmarkdown,devtools)
+
+
+```
+
+
+# Executive summary
+
+In the current study I have described the main issues with the provided datasets and provided results for the 2 machine learning algorithms (KNN and Random Forest).
+
+Results, acquired by random Forest model for the chosen preprocessed dataset, are closer to the real ones.
+Nevertheless, there are still some quite high errors for predicting Latitude and Longitude, which require further data analysis and another preprocessing iteration in order to improve final results.
+
+
+# Goals
+
+The main goals of current study are:
+
+ - To investigate the feasibility of using "wifi fingerprinting" to determine a person's location in indoor spaces.
+ 
+ - To evaluate multiple machine learning models to see which produces the best result.
+ 
+ - Provide recommendations, based on your own research on indoor locationing, of how the results might be improved.
+
+
+# Description and location of related data sources
+![Universitat Jaume I](D:/Ubiqum/Module 3/Task 3.3_WiFi/Pictures/Uni.PNG)
+
+
+  We have been provided with a large database of wifi fingerprints for a multi-building industrial campus with a location (building, floor, and location ID) associated with each fingerprint.
+
+  The UJIIndoorLoc database covers three buildings of Universitat Jaume I with 4 or more floors and almost 110.000m2.
+
+  It was created in 2013 by means of more than 20 different users and 25 Android devices. The database consists of 19937 training/reference records (trainingData.csv file) and 1111 validation/test records (validationData.csv file). 
+
+  The 529 attributes contain the WiFi fingerprint, the coordinates where it was taken, and other useful information.
+
+  Each WiFi fingerprint can be characterized by the detected Wireless Access Points (WAPs) and the corresponding Received Signal Strength Intensity (RSSI). The intensity values are represented as negative integer values ranging -104dBm (extremely poor signal) to 0dbM. The positive value 100 is used to denote when a WAP was not detected. During the database creation, 520 different WAPs were detected. Thus, the WiFi fingerprint is composed by 520 intensity values. 
+
+
+# Explore the Data
+## Signal Strength Intensity
+
+  The **strongest signal** for validating set is  **- 34dBm**, while **trainig set** have signals **above  - 30dBm**.
+  
+  Moreover there are several WAPs, which are sending **signals above  - 30dBm  at the same time in the same location**. This is impossible in the real life conditions
+(*for more information check here: https://www.metageek.com/training/resources/understanding-rssi.html*).
+
+```{r read data, include=FALSE}
+phones_melt_am <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/Amazing signals his.csv")
+
+```
+```{r Amazing signals histogram, echo=FALSE, warning=FALSE}
+all_ph_amaz<-ggplot(phones_melt_am, aes(x=value)) + geom_histogram(color="darkblue", fill="lightblue", stat="count")+
+  xlab("Signal intencity") + ylab("Frequency")+ggtitle("Signal frequency for all phones - only Amazing signals (above -30 dBm)")+
+  theme(plot.title = element_text(hjust = 0.5))
+ggplotly(all_ph_amaz)
+
+```
+
+
+
+ Another anomalous observation   - are signals provided by **User ID 6, phone 19 in the  Building 3, Floor 4&5. All of them are  above -30dBm**, which is unreal *(green color on the chart below)*.  
+
+
+
+```{r Amazing by user ID, echo=FALSE}
+Amaz <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/Amazing by user ID.csv")
+```
+```{r Amazing by user ID plot, echo=FALSE}
+
+l <- list(
+  font = list(
+    family = "sans-serif",
+    size = 30,
+    color = "#000"))
+
+plot_ly(Amaz, x = ~LONGITUDE, y = ~LATITUDE, z = ~unclass(FLOOR),marker = list(size = 6)) %>%
+  add_markers(color = ~as.factor(USERID),colors = "Set1") %>%
+  layout(title = "Amazing signals distribution_train data (above -30 dBm)",scene = list(xaxis = list(title = 'LONGITUDE'),
+                                                                yaxis = list(title = 'LATITUDE'),
+                                                                zaxis = list(title = 'Floor' ))) %>%   layout(legend = l)
+
+
+```
+
+  At the same time, if we will remove observations provided by User ID 6, we will significantly reduce signals for Building 3, 5th floor.
+  
+Therefore I have kept these observations.
+
+*Click - unclick User ID nr. 6 on the chart below to see changes in the coverage on the 5th floor of the 3rd building*
+
+***
+<span style="color:darkmagenta"> 
+*! For the chart below I have used dataset __after__  the 1st preprocessing.*
+</span>
+
+```{r read Clean_data_subset_NA, echo=FALSE}
+Clean_data_subset_NA <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/Clean_data_subset_NA.csv")
+```
+
+```{r Signals distribution_clean data, echo=FALSE, warning=FALSE}
+# Script WiFi v1
+plot_ly(Clean_data_subset_NA, x = ~LONGITUDE, y = ~LATITUDE, z = ~unclass(FLOOR),marker = list(size = 5)) %>%
+  add_markers(color = ~as.factor(USERID),colors = "Set1") %>%
+  layout(title = "Signals distribution_clean data",scene = list(xaxis = list(title = 'LONGITUDE'),
+                      yaxis = list(title = 'LATITUDE'),
+                      zaxis = list(title = 'Floor' )))
+
+```
+
+I have observed **strange signal patterns from phone ID 11 and 17**, which is also visible on the signal frequency chart for  **building 3 and floors 2 & 5**.
+
+<span style="color:darkmagenta"> 
+Additional investigation is required for the previous point.
+No specific actions were taken with the data regarding this point during current model training.
+</span>
+
+```{r read Signal frequency per phone ID, echo=FALSE}
+phones_melt <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/Signal frequency per phone ID.csv")
+
+```
+
+```{r Signal frequency per phone ID, echo=FALSE, warning=FALSE}
+
+ph<- ggplot(phones_melt, aes(x=value)) + geom_histogram(color="darkblue", fill="lightblue", stat="count")+
+  xlab("Signal") + ylab("Frequency")+ggtitle("Signal frequency per phone ID")+
+  theme(plot.title = element_text(hjust = 0.5))+
+facet_wrap(~PHONEID,scales = "free_x")
+
+ph<- ph + theme(axis.text.x = element_text(face="plain", color="black", 
+                                     size=8,angle=45),
+          axis.text.y = element_text(face="plain", color="darkgrey", 
+                                     size=10, angle=0))
+ 
+ggplotly(ph)
+
+```
+```{r read Signal frequency per Build_Floor ID, echo=FALSE}
+phones_melt1 <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/Signal frequency per Build_Floor ID.csv")
+
+```
+
+```{r Signal frequency per Build_Floor ID, echo=FALSE, warning=FALSE}
+ph<- ggplot(phones_melt1, aes(x=value)) + geom_histogram(color="darkblue", fill="lightblue", stat="count")+
+  xlab("Signal") + ylab("Frequency")+ggtitle("Signal frequency per Building_Floor")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  facet_wrap(~ID,scales = "free_x")
+
+ph<- ph + theme(axis.text.x = element_text(face="plain", color="black", 
+                                           size=8,angle=45),
+                axis.text.y = element_text(face="plain", color="darkgrey", 
+                                     size=10, angle=0))
+ 
+ggplotly(ph)
+
+```
+
+## WAPs with the missing signal
+
+
+There were detected some WAPs which **are not sending any signals**, as well as WAPs, which are **sending signals to the different buildings and even floors**.
+
+
+
+![General information about WAP signals](D:/Ubiqum/Module 3/Task 3.3_WiFi/Pictures/Info WAP.PNG)
+
+
+## WAPs location
+
+
+  Also there were detected some WAPs, which are located in the **different buildings in the training and validation sets**:
+
+
+
+![Relocated WAPs. Training and Validationg datasets](D:/Ubiqum/Module 3/Task 3.3_WiFi/Pictures/Relocated WAPs.PNG)
+
+<span style="color:darkmagenta"> 
+*This anomaly was detected after I have done first preprocessing and trained the models.
+Mainly all those WAPs emited signals below -80 dBm, so they were automatically removed during the first preprocessing, except WAP216, which appeared in the training set.*
+</span> 
+
+
+## Coverage
+
+
+
+First of all, we can see, that training set have **blind spots - areas with no wifi fingerprints provided**.
+
+
+```{r read trainig and validation sets, echo=FALSE}
+new_dataset <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/trainig and validation sets.csv")
+
+```
+
+```{r trainig and validation sets, echo=FALSE}
+plot_ly(new_dataset, x = ~LONGITUDE, y = ~LATITUDE, z = ~unclass(FLOOR),marker = list(size = 5)) %>%
+  add_markers(color = ~as.factor(Origin),colors = "Set1") %>%
+  layout(title = "Signals distribution - trainig and validation sets",scene = list(xaxis = list(title = 'LONGITUDE'),
+                                                                yaxis = list(title = 'LATITUDE'),
+                                                                zaxis = list(title = 'Floor' )))
+```
+
+
+Also, as it is displayed on the charts below we can see, that **coverage** (qty of WAPs sending good signal) **is not distributed equally**. Such locations as **5th floor of the 3rd Building or some spots in the 2nd building do not have enough signals**, so it will impact negatively on predicted results.
+
+
+
+```{r read Very Good and OKay signals, echo=FALSE}
+Very_G <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/Very Good and OKay signals.csv")
+
+```
+
+```{r Very Good and OKay signals, echo=FALSE}
+
+l <- list(
+  font = list(
+    family = "sans-serif",
+    size = 30,
+    color = "#000"))
+
+plot_ly(Very_G, x = ~LONGITUDE, y = ~LATITUDE, z = ~unclass(FLOOR),marker = list(size = 6)) %>%
+  add_markers(color = ~as.factor(Very_Good),colors = "Set1") %>%
+  layout(title = "Acceptable signals (between -75 & - 30 dBm) distribution_train data",scene = list(xaxis = list(title = 'LONGITUDE'),
+                                                                        yaxis = list(title = 'LATITUDE'),
+                                                                        zaxis = list(title = 'Floor' ))) %>% 
+                                                                        layout(legend = l)
+```
+
+# Preprocessing
+I have tried different preprocessed datasets and would like to focus on 2 of them.
+
+
+## First preprocessing 
+
+For the first preprocessing I have proceeded as below:
+
+1.	I have **combined training and validation sets**.
+ As it was mentioned before, training set did not contain all the necessary WiFi fingerprints, therefore I have used validation dataset to cover empty spots.
+2.	**Replaced all values higher, than – 30 dBm to ==  – 30 dBm**.
+[Check *Signal Strength Intensity* for more details](#Signal Strength Intensity)
+3. **Replaced all values lower, than – 80 dBm to == 100 dBm**.
+*-80dBm - minimum signal strength for basic connectivity. Packet delivery may be unreliable. *
+4. **Removed totally duplicated rows**
+
+5. **Removed rows & columns for WAPs which contain ONLY 100 dBm**  (do not emit any signal)
+
+6. **I have discretized Longitude and Latitude in 10 bins** in order to use new categorical variables for stratified sampling.
+
+7. To increase calculation time I took **stratified sample** of cleaned dataset and divided it into **training and testing sets**.
+
+
+
+## Second preprocessing 
+
+
+For the second dataset, additionally to the previous steps I have decided to:
+
+1.	**Remove signals, which are above – 30 dBm** instead of replacing them with -30 dBm .
+2.	**Remove all WAPs, which were re-located** (Nr. 55,56,195,196,216)
+3.	**Remove WAPs, which are sending signals to the different buildings**
+
+After I have plotted cleaned data from the second preprocessing I have realized, that there are some areas with too few signals, for example, 2nd building. So I have decided to drop 3rd step and to keep all WAPs,  which are sending signals to the different buildings.
+
+Below chart represents signals by those WAPs, which are sending signals to **only one building**.
+
+
+```{r read data 2, echo=FALSE}
+combi_WAP_NoDUP_OnlySig <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/WiFi Sample 2/Sample 2_WiFi/Files for markdown/Sample 2_Signals by only unique WAPs.csv")
+
+```
+```{r Unique WAps signals, echo=FALSE}
+
+plot_ly(combi_WAP_NoDUP_OnlySig, x = ~LONGITUDE, y = ~LATITUDE, z = ~unclass(FLOOR),marker = list(size = 5)) %>%
+add_markers(color = ~as.factor(Origin), colors ="Set1") %>%
+layout(title = "Signals by only those WAPs, which are sending signals within only one building",scene = list(xaxis = list(title = 'LONGITUDE'), yaxis = list(title = 'LATITUDE'), zaxis = list(title = 'Floor' )))
+
+```
+
+Going forward, I would like to mention, that **results for the models with the 2nd preprocessing were not improved**, so further description will be focused on the models with the 1st preprocessing.
+
+
+# Training models & Error assessment
+
+
+I have trained models with 2 algorithms – **KNN and random Forest**.
+
+I have also tried knn3 and kknn (kernel =”triangular”) algorithms, but error metrics for predicting Building were lower, than for KNN and Random Forest, so I have decided not to proceed with these algorithms and focused only on KNN and Random Forest.
+
+
+
+I have decided to use cascade model for predicting each parameter: 
+
+- First I have predicted the **Building**;
+- Then, based on predicted Building I have **divided  training and testing sets into subsets for each building separately**; 
+-	Later on, **for each subset I predicted the Floor, Latitude and Longitude**.
+
+After predicting Building and analysing error metrics, provided below, I have chosen to proceed with the predicted values for Building by **Random Forest algorithm**.
+
+Below there is a summary table for Accuracy & Kappa & confusion matrix for predicting categorical variables such as Building and Floor.
+
+![Error metrics for classification algorithms - 1st preprocessing](D:/Ubiqum/Module 3/Task 3.3_WiFi/Pictures/Error metrics.PNG)
+
+![Error metrics for classification algorithms - 2nd preprocessing](D:/Ubiqum/Module 3/Task 3.3_WiFi/Pictures/Error metrics 2.PNG)
+
+Summary for error metrics for Latitude and Longitude:
+
+```{r read Errors for Lat and Lon, echo=FALSE}
+    all_lat_melt <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/all_lat_melt_errors.csv")
+    all_lon_melt <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/all_lon_melt_errors.csv")
+
+```
+
+```{r Ploting Error metrics for Lat , echo=FALSE, warning=FALSE}
+
+# Script Errors
+
+ggplot(all_lat_melt, aes(x=Model, y=value,fill=Model))+
+  geom_col()+ggtitle("Error metrics for predicted Lattitude")+theme(plot.title = element_text(hjust = 0.5))+
+  facet_grid(Building ~ variable, scales="free")
+
+```
+
+```{r Ploting Error metrics for Lon, echo=FALSE, warning=FALSE}
+
+# Script Errors
+
+
+ ggplot(all_lon_melt, aes(x=Model, y=value,fill=Model))+
+  geom_col()+ggtitle("Error metrics for predicted Longitude")+theme(plot.title = element_text(hjust = 0.5))+
+  facet_grid(Building ~ variable, scales="free")
+
+```
+
+As we can observe from the residuals plot -  each building have some errors.
+The highest errors are for the Longitude of the 2nd Building, so for the further investigation,  at first these errors need to be checked.
+
+```{r read testSets 1 & 2, echo=FALSE}
+    testSet_Build_1 <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/testSet_Build_1.csv")
+
+testSet_Build_2 <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/testSet_Build_2.csv")
+
+testSet_Build_3 <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/testSet_Build_3.csv")
+
+```
+```{r Ploting residuals for Longitude and latitude, echo=FALSE, warning=FALSE}
+
+# Building 1
+B1_lat<-ggplot(testSet_Build_1, aes(x = LATITUDE, y = Pr_LAT_tuneRF)) +
+  geom_point() +
+  geom_smooth(method = lm, se = FALSE)+
+  ggtitle(" BUILDING 1:Latitude - Real vs Predicted")
+
+B1_lon <- ggplot(testSet_Build_1, aes(x = LONGITUDE, y = Pr_Lon_tuneRF)) +
+  geom_point() +
+  geom_smooth(method = lm, se = FALSE)+
+  ggtitle(" BUILDING 1:Longitude - Real vs Predicted")
+
+
+# Building 2
+B2_lat <- ggplot(testSet_Build_2, aes(x = LATITUDE, y = Pr_LAT_tuneRF)) +
+  geom_point() +
+  geom_smooth(method = lm, se = FALSE)+
+  ggtitle(" BUILDING 2:Latitude - Real vs Predicted")
+
+B2_lon <- ggplot(testSet_Build_2, aes(x = LONGITUDE, y = Pr_Lon_tuneRF)) +
+  geom_point() +
+  geom_smooth(method = lm, se = FALSE)+
+  ggtitle(" BUILDING 2:Longitude - Real vs Predicted")
+
+# Building 3
+B3_lat <- ggplot(testSet_Build_3, aes(x = LATITUDE, y = Pr_LAT_tuneRF)) +
+  geom_point() +
+  geom_smooth(method = lm, se = FALSE)+
+  ggtitle(" BUILDING 3:Latitude - Real vs Predicted")
+
+B3_lon <- ggplot(testSet_Build_3, aes(x = LONGITUDE, y = Pr_Lon_tuneRF)) +
+  geom_point() +
+  geom_smooth(method = lm, se = FALSE)+
+  ggtitle(" BUILDING 3:Longitude - Real vs Predicted")
+
+require(pdp)
+grid.arrange(B1_lat,B1_lon,B2_lat,B2_lon,B3_lat,B3_lon,nrow = 3)
+
+```
+
+On the plots below correct and wrong prediction for Building and Floor. 
+
+
+```{r read All Buildings _testSet Build, echo=FALSE, warning=FALSE}
+    All_testSet <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/All Buildings _testSet.csv")
+
+```
+
+```{r All Buildings _testSet Build, echo=FALSE, warning=FALSE}
+
+plot_ly(All_testSet, x = ~LONGITUDE, y = ~LATITUDE, z = ~unclass(FLOOR),marker = list(size = 5),color = ~as.factor(Build_check), colors = c( '#0C4B8E','#BF382A')) %>%
+  
+  layout(title = "Signals distribution - TestSet all buildings. Predicted Building",scene = list(xaxis = list(title = 'LONGITUDE'),
+                                                                                   yaxis = list(title = 'LATITUDE'),
+                                                                                   zaxis = list(title = 'Floor' )))
+
+```
+
+
+```{r All Buildings _testSet Floor, echo=FALSE, warning=FALSE}
+
+
+plot_ly(All_testSet, x = ~LONGITUDE, y = ~LATITUDE, z = ~unclass(FLOOR),marker = list(size = 5),color = ~as.factor(Floor_check), colors = c( '#0C4B8E','#BF382A')) %>%
+  
+  layout(title = "Signals distribution - TestSet all buildings. Predicted Floors",scene = list(xaxis = list(title = 'LONGITUDE'),
+                                                                                                 yaxis = list(title = 'LATITUDE'),
+                                                                                                 zaxis = list(title = 'Floor' )))
+
+```
+
+
+Histogram below demostrates quantity of incorrectly classified Buildings & Floors by different PhoneID.
+It is need to mention, that **only 2 phone IDs** are repeated in the both, training and validation sets - Phone ID 13 & 14.
+
+
+```{r read All_testSet_cor& mis, echo=FALSE, warning=FALSE}
+# script Spike tunRF 
+    All_testSet_cor <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/All_testSet_cor.csv")
+    All_testSet_mis <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/All_testSet_mis.csv")
+    
+```
+
+```{r All_testSet_cor& mis, echo=FALSE, warning=FALSE}
+
+ w <- ggplot(All_testSet_cor, aes(All_testSet_cor$PHONEID, fill='Correct')) + 
+   geom_histogram(binwidth = 2) +
+   geom_histogram(data=All_testSet_mis, aes(All_testSet_mis$PHONEID, fill='Incorrect'),
+                  alpha=0.7, binwidth = 2) +
+   scale_fill_manual(values=c('Correct'='green', 'Incorrect'='blue')) +
+   labs(fill='Prediction') +
+   theme(text = element_text(size=10)) +
+   theme(panel.border=element_rect(colour='black', fill=NA)) +
+   ggtitle('Quantity of incorrectly classified Building_Floor by PhoneID') +
+   xlab('Phone numbers')
+
+ ggplotly(w)
+
+```
+
+
+
+```{r read Errors distribution. Building 1 - Longitude.Density, echo=FALSE, warning=TRUE}
+    Longitude <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/Errors distribution. Building 1 - Longitude.Density.csv")
+
+```
+
+Plot below demonstrates distribution of absolute errors for predicted latitude and longitude for both models for the Building 1:
+
+```{r Errors distribution. Building 1 - Longitude. Density, echo=FALSE, warning=FALSE}
+
+L02 <- ggplot(Longitude, aes(Longitude, fill = Error)) + geom_density(alpha = 0.2)+
+ggtitle("Errors distribution. Building 1 Longitude") + theme(plot.title = element_text(hjust = 0.5))+
+  xlab("Errors (Original-predicted value)") + ylab("Density")
+
+ggplotly(L02)
+
+```
+
+
+
+```{r read Errors distribution. Building 1 - Longitude, echo=FALSE}
+  Longitude_B1_test1 <- read.csv("D:/Ubiqum/Module 3/Task 3.3_WiFi/Data for Markdown/Errors distribution. Building 1 - Longitude (except interval from -1 to 1).csv")
+
+```
+```{r Errors distribution. Building 1 - Longitude, echo=FALSE}
+
+L01 <- ggplot(Longitude_B1_test1, aes(x=Longitude, fill=Error)) +
+  geom_histogram(binwidth=.5, alpha=.5, position="identity")+
+ggtitle("Errors distribution. Building 1 - Longitude (except interval from -1 to 1)") + theme(plot.title = element_text(hjust = 0.5))+
+  xlab("Errors (Original-predicted value)")
+
+ggplotly(L01)
+
+```
+
+
+
+As we can see both models have some sporadic high errors, but **Random forest provide results with less errors** for all variables.
+So as a final model for the current subset I have chosen Random Forest model.
+
+
+
+# Next steps
+
+For the next steps I would like to:
+
+1.	To find better way to discretize Longitude and Latitude for stratified sample.
+2.	To investigate more WAPs, which are sending signals to the different buildings.
+3.  To check errors in the context of phone models.
+3.  To check in details segments of errors and to re-process data according to new insights.
+
+# Recommendations
+
+It is recommended to  ensure presence of WiFi fingerprints for the empty spots for the training set like 5th Floor of the 3rd building, some spots in the second and first building.
+
+[Check plot for only training set in *Coverage* chapter](# Coverage)
+
+For better results it is also recommended to dipdive into the points, mentioned [in the *Next steps* chapter](#Next steps).
+
+
+
