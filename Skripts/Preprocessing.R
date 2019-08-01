@@ -10,10 +10,6 @@
 # 10. If it is ok, think about discretizig LONG and LAT, and repeat 9 with new groub_by
 
 
-# wifi_data ->19 937 obs x 530 col
-# valid_data ->1 111 obs x 530 col
-# Combi_data -> 21 048 obs x 530 
-
 # No_signal observations  -> 76 obs
 # Duplicated  -> 772 obs
 # Waps do not receive any signal though all observation  -> 55 columns
