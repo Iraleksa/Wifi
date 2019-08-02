@@ -6,8 +6,7 @@
 # 6.Check those lines which have wap_num less than 3, maybe we need to remove it.
 # 7.To check WAPs, which are receiving signals from several buildings. How much of them after previous steps.
 # 8.Devide dataset in to training and testing sets
-# 9.Cross the fingers and check Gabi`s tuneRF
-# 10. If it is ok, think about discretizig LONG and LAT, and repeat 9 with new groub_by
+
 
 
 # wifi_data ->19 937 obs x 530 col
