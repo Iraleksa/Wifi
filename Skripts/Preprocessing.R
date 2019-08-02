@@ -5,7 +5,7 @@
 # 5.Remove  rows & columns for WAPS [,1:520] which contain ONLY 100 (no signal)
 # 6.Check those lines which have wap_num less than 3, maybe we need to remove it.
 # 7.To check WAPs, which are receiving signals from several buildings. How much of them after previous steps.
-# 8.Devide dataset in to training and testing sets
+
 
 
 
